@@ -81,8 +81,7 @@ def test_cli_synthetic_and_images_modes(tmp_path):
     assert json.loads((out / "metrics.json").read_text())["depth"] == "skipped"
     # image-folder mode on the rendered frames (true focal length supplied, no ground truth)
     f = 0.5 * 640 / np.tan(np.deg2rad(35))
-    m2 = main(
-        ["--images", str(imgs), "--focal", f"{f}", "--skip-depth", "--out", str(tmp_path / "o2")]
-    )
+    out2 = tmp_path / "o2"
+    m2 = main(["--images", str(imgs), "--focal", f"{f}", "--skip-depth", "--out", str(out2)])
     assert m2["registered"] >= 3 and "trajectory" not in m2
     assert (out2 / "mesh.obj").exists()
