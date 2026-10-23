@@ -44,13 +44,22 @@ def plot_trajectory(est_centers, gt_centers, path: Path, title="Camera trajector
     plt.close(fig)
 
 
-def plot_cloud(points, cam_centers, path: Path, title="Reconstructed sparse point cloud") -> None:
+def plot_cloud(
+    points,
+    cam_centers,
+    path: Path,
+    title="Reconstructed sparse point cloud (axes clipped to 1-99 percentile)",
+) -> None:
     fig = plt.figure(figsize=(11, 4))
     views = [("x", "y", 0, 1), ("x", "z", 0, 2), ("y", "z", 1, 2)]
     for k, (a, b, i, j) in enumerate(views):
         ax = fig.add_subplot(1, 3, k + 1)
         ax.scatter(points[:, i], points[:, j], c=points[:, 2], s=2, cmap="viridis")
         ax.scatter(cam_centers[:, i], cam_centers[:, j], c="red", marker="^", s=30, label="cameras")
+        lo, hi = np.quantile(points[:, [i, j]], [0.01, 0.99], axis=0)
+        pad = 0.1 * (hi - lo)
+        ax.set_xlim(lo[0] - pad[0], hi[0] + pad[0])
+        ax.set_ylim(lo[1] - pad[1], hi[1] + pad[1])
         ax.set_xlabel(a)
         ax.set_ylabel(b)
         ax.set_aspect("equal")

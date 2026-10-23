@@ -1,9 +1,10 @@
-"""Optional monocular depth comparison (MiDaS small via torch hub).
+"""Optional monocular depth comparison (Depth Anything V2 Small via Hugging Face transformers).
 
 Monocular networks predict *relative inverse depth* (up to unknown scale and shift per image), so
 they are compared to SfM depth only after a least-squares scale+shift fit in inverse-depth space.
-Everything except :func:`predict_midas` is pure numpy; the network needs ``torch`` + ``timm`` and
-a one-off weight download, and the pipeline works without it (``--skip-depth``).
+Everything except :func:`predict_relative_depth` is pure numpy; the network needs ``torch`` and
+``transformers`` plus a one-off weight download, and the pipeline works without it
+(``--skip-depth``).
 """
 
 from __future__ import annotations
@@ -16,25 +17,33 @@ class DepthUnavailableError(RuntimeError):
     pass
 
 
-def predict_midas(image_bgr: np.ndarray, model_name: str = "MiDaS_small") -> np.ndarray:
-    """Relative inverse depth map (H, W), larger = closer. CPU only."""
+def predict_relative_depth(
+    image_bgr: np.ndarray, model_id: str = "depth-anything/Depth-Anything-V2-Small-hf"
+) -> np.ndarray:
+    """Relative inverse depth map (H, W) from Depth Anything V2 Small (25M params), CPU only.
+
+    Larger values are closer. Needs ``pip install torch transformers`` and a one-off ~100 MB
+    weight download from the Hugging Face Hub; raises :class:`DepthUnavailableError` otherwise.
+    """
     try:
+        import socket
+
         import cv2
         import torch
+        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
-        model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)
-        transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
-    except Exception as e:  # missing torch/timm, no network, hub changes: all non-fatal
+        socket.setdefaulttimeout(60)  # never hang the pipeline on a stalled download
+        processor = AutoImageProcessor.from_pretrained(model_id)
+        model = AutoModelForDepthEstimation.from_pretrained(model_id).eval()
+    except Exception as e:  # missing packages, no network, hub changes: all non-fatal
         raise DepthUnavailableError(f"{type(e).__name__}: {e}") from e
-    model.eval()
-    tf = transforms.small_transform if model_name == "MiDaS_small" else transforms.dpt_transform
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     with torch.no_grad():
-        pred = model(tf(rgb))
-        pred = torch.nn.functional.interpolate(
-            pred.unsqueeze(1), size=rgb.shape[:2], mode="bicubic", align_corners=False
-        ).squeeze()
-    return pred.numpy()
+        out = model(**processor(images=rgb, return_tensors="pt")).predicted_depth
+        out = torch.nn.functional.interpolate(
+            out.unsqueeze(1), size=rgb.shape[:2], mode="bicubic", align_corners=False
+        )
+    return out.squeeze().numpy()
 
 
 def sample_map(depth_map: np.ndarray, uv: np.ndarray) -> np.ndarray:

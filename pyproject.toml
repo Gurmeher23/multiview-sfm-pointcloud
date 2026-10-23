@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
-depth = ["torch", "timm"]
+depth = ["torch", "transformers"]
 
 [tool.setuptools]
 packages = ["sfm"]

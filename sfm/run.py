@@ -119,7 +119,9 @@ def main(argv: list[str] | None = None) -> dict:
         help="only run bundle adjustment at the end (default: after every view too)",
     )
     ap.add_argument("--out", type=Path, default=Path("outputs"))
-    ap.add_argument("--skip-depth", action="store_true", help="skip the optional MiDaS comparison")
+    ap.add_argument(
+        "--skip-depth", action="store_true", help="skip the optional monocular-depth comparison"
+    )
     ap.add_argument("--skip-mesh", action="store_true")
     ap.add_argument("--write-images", type=Path, help="(--synthetic) also save the rendered images")
     args = ap.parse_args(argv)
@@ -178,7 +180,7 @@ def main(argv: list[str] | None = None) -> dict:
         v = res.registered[0]
         uv, z = res.view_samples(v)
         try:
-            pred = depth.predict_midas(images[v])
+            pred = depth.predict_relative_depth(images[v])
             metrics["depth"] = {
                 "view": v,
                 **depth.compare_inverse_depth(depth.sample_map(pred, uv), z),
