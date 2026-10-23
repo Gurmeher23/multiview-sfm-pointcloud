@@ -6,7 +6,9 @@ All routines that say "normalised" take image coordinates with the intrinsics re
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
+from scipy.optimize import least_squares
 
 
 def skew(v: np.ndarray) -> np.ndarray:
@@ -171,3 +173,33 @@ def triangulation_angle_deg(C1: np.ndarray, C2: np.ndarray, X: np.ndarray) -> np
     b = C2 - X
     c = np.sum(a * b, axis=1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1))
     return np.degrees(np.arccos(np.clip(c, -1, 1)))
+
+
+def _unit_from_angles(a: float, b: float) -> np.ndarray:
+    return np.array([np.sin(a) * np.cos(b), np.sin(a) * np.sin(b), np.cos(a)])
+
+
+def refine_pose_sampson(
+    R: np.ndarray, t: np.ndarray, x1: np.ndarray, x2: np.ndarray, f_scale: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Gold-standard polish of a relative pose: minimise the Sampson distance over (R, t).
+
+    The five degrees of freedom are a rotation vector and the translation direction (two
+    spherical angles), so the essential matrix ``E = [t]x R`` is valid by construction. The
+    residual is the signed Sampson distance and a Huber loss (scale ``f_scale``, normalised
+    units) down-weights residual outliers.
+    """
+    t = np.asarray(t, float).ravel()
+    t = t / np.linalg.norm(t)
+    h1 = np.column_stack([x1, np.ones(len(x1))])
+    h2 = np.column_stack([x2, np.ones(len(x2))])
+
+    def residuals(p):
+        E = skew(_unit_from_angles(p[3], p[4])) @ cv2.Rodrigues(p[:3])[0]
+        Fx1, Ftx2 = h1 @ E.T, h2 @ E
+        den = np.sqrt(Fx1[:, 0] ** 2 + Fx1[:, 1] ** 2 + Ftx2[:, 0] ** 2 + Ftx2[:, 1] ** 2)
+        return np.sum(h2 * Fx1, axis=1) / den
+
+    p0 = np.r_[cv2.Rodrigues(R)[0].ravel(), np.arccos(np.clip(t[2], -1, 1)), np.arctan2(t[1], t[0])]
+    sol = least_squares(residuals, p0, loss="huber", f_scale=f_scale)
+    return cv2.Rodrigues(sol.x[:3])[0], _unit_from_angles(sol.x[3], sol.x[4])

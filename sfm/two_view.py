@@ -8,7 +8,13 @@ import cv2
 import numpy as np
 
 from .camera import Pose, normalize_pixels, project
-from .geometry import eight_point, sampson_error, triangulate_dlt, triangulation_angle_deg
+from .geometry import (
+    refine_pose_sampson,
+    sampson_error,
+    skew,
+    triangulate_dlt,
+    triangulation_angle_deg,
+)
 
 
 @dataclass
@@ -43,15 +49,18 @@ def estimate_two_view(
     inl = mask.ravel().astype(bool)
     if inl.sum() < 8:
         return None
-    # OpenCV's 5-point RANSAC returns the minimal-sample model; refit on all inliers with the
-    # normalised 8-point algorithm (least squares) and re-evaluate the inliers.
     xn1, xn2 = normalize_pixels(K, p1), normalize_pixels(K, p2)
-    E_ref = eight_point(xn1[inl], xn2[inl], essential=True)
-    inl_ref = sampson_error(E_ref, xn1, xn2) < (threshold_px / K[0, 0]) ** 2
-    if inl_ref.sum() >= max(8, 0.9 * inl.sum()):
-        E, inl = E_ref, inl_ref
     _, R, t, _ = cv2.recoverPose(E, p1[inl], p2[inl], K)
     t = t.ravel()
+    # OpenCV's RANSAC returns a minimal-sample model. Polish the pose by minimising the Sampson
+    # distance over (R, t) on the inliers, then re-count the inliers under the refined model.
+    thr = threshold_px / K[0, 0]
+    for _ in range(2):
+        R_ref, t_ref = refine_pose_sampson(R, t, xn1[inl], xn2[inl], f_scale=thr)
+        inl_ref = sampson_error(skew(t_ref) @ R_ref, xn1, xn2) < thr**2
+        if inl_ref.sum() < 8:
+            break
+        R, t, inl = R_ref, t_ref, inl_ref
     P1, P2 = np.hstack([np.eye(3), np.zeros((3, 1))]), np.hstack([R, t.reshape(3, 1)])
     X = triangulate_dlt(P1, P2, normalize_pixels(K, p1), normalize_pixels(K, p2))
     pose2 = Pose(R, t)
